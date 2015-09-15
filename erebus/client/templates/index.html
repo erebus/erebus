@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en" ng-app="erebus">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="">
+    <meta name="author" content="">
+
+    <title>erebus - Tor Relay Dashboard</title>
+
+    <link href="/static/css/bootstrap.css" rel="stylesheet">
+    <link href="/static/css/flat-ui.min.css" rel="stylesheet">
+    <link href="/static/font-awesome/css/font-awesome.min.css" rel="stylesheet" type="text/css">
+
+    <link href="/static/css/erebus.css" rel="stylesheet">    
+</head>
+
+<body>
+    <div id="wrapper">
+        <!-- Navigation -->
+        <nav class="navbar navbar-default erebus-navbar">
+            <div class="container-fluid">
+                <div class="navbar-header">
+                    <h1 class="erebus-logo">erebus</h1>
+                </div>
+
+                <div class="collapse navbar-collapse">
+                    <ul class="nav navbar-nav">
+                        <li class="active"><a href="#"><i class="fa fa-fw fa-dashboard"></i> &nbsp; Dashboard</a></li>
+                    </ul>
+
+                    <ul class="nav navbar-nav navbar-right">
+                        <li><a href="https://erebus.github.io" target="_blank">
+                            <i class="fa fa-fw fa-question-circle"></i> &nbsp; Documentation
+                        </a></li>
+                    </ul>
+                </div><!-- /.navbar-collapse -->
+            </div><!-- /.container-fluid -->
+        </nav>
+        <div ng-controller="relayInfo" id="subnav" class="container-fluid">
+            <div class="row">
+                <div class="col-lg-2 erebus-info">
+                    <span class="bold"><i class="fa fa-fw fa-info-circle"></i> Tor version:</span> {{!info.version}}
+                </div>
+                <div class="col-lg-3 erebus-info">
+                    <i class="fa fa-fw fa-user bold"></i> {{!info.nickname}}
+                </div>
+                <div class="col-lg-4 erebus-info">
+                    <i class="fa fa-fw fa-key bold"></i> {{!info.fingerprint}}
+                </div>
+                <div class="col-lg-3 erebus-info">
+                    <i class="fa fa-fw fa-circle bold status-{{!info.status}}"></i> {{!info.status}}
+                </div>
+            </div><!-- /.container-fluid -->
+        </div>
+
+        <div id="page-wrapper" class="container-fluid">
+            <div class="col-lg-7 col-xs-12">
+
+                <!-- Bandwidth graph -->                
+                <div ng-controller="bandwidthGraph" id="bw" class="erebus-panel">
+                    <div class="panel-header">
+                        <h6><i class="fa fa-fw fa-bar-chart"></i> Live bandwidth usage</h6>
+                    </div>
+                    <div class="panel-content">
+                        <div class="row">
+                            <div class="col-lg-4 erebus-info">
+                                <span class="bold"><i class="fa fa-fw fa-minus-circle"></i> Limit:</span> {{!stats.limit}}
+                            </div>
+                            <div class="col-lg-4 erebus-info">
+                                <span class="bold"><i class="fa fa-fw fa-line-chart"></i> Burst:</span> {{!stats.burst}}
+                            </div>
+                            <div class="col-lg-4 erebus-info">
+                                <span ng-if="stats.measured" class="bold"><i class="fa fa-fw fa-dashboard"></i> Measured:</span> {{!stats.measured}}
+                                <span ng-if="stats.observed" class="bold"><i class="fa fa-fw fa-dashboard"></i> Observed:</span> {{!stats.observer}}
+                            </div>
+                        </div>
+                        <div id="bw-graph">
+                            <linechart class="graph" data="data" options="options" mode="" width="" height=""></linechart>
+                        </div>
+                        <div class="read">
+                            <div class="row">
+                                <div class="col-lg-4 erebus-info">
+                                    <span class="bold"><i class="fa fa-fw fa-download"></i> Read:</span> {{!stats.read}}
+                                </div>
+                                <div class="col-lg-4 erebus-info">
+                                    <span class="bold">Average:</span> {{!stats.read_avg}}
+                                </div>
+                                <div class="col-lg-4 erebus-info">
+                                    <span class="bold">Total:</span> {{!stats.read_total}}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="written">
+                            <div class="row">
+                                <div class="col-lg-4 erebus-info">
+                                    <span class="bold"><i class="fa fa-fw fa-upload"></i> Written:</span> {{!stats.written}}
+                                </div>
+                                <div class="col-lg-4 erebus-info">
+                                    <span class="bold">Average:</span> {{!stats.write_avg}}
+                                </div>
+                                <div class="col-lg-4 erebus-info">
+                                    <span class="bold">Total:</span> {{!stats.write_total}}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="clearfix"></div>
+                    </div>
+                </div><!-- /.erebus-panel -->
+
+            </div><!-- /.col-lg-7 -->
+            
+            <div class="col-lg-5 col-xs-12">
+
+                <!-- Log console -->
+                <div class="erebus-panel">
+                    <div class="panel-header">
+                        <h6><i class="fa fa-fw fa-flag"></i> Log console</h6>
+                    </div>
+                    <div class="panel-content">
+                        <div ng-controller="logDisplay" id="log-console">
+                            <div ng-repeat="entry in entries" class="event">
+                                <div class="row">
+                                    <div class="col-lg-2 type">
+                                        <span class="badge {{!entry.type}}">{{!entry.type}}</span>
+                                        <span>{{!entry.time}}</span>
+                                    </div>
+                                    <div class="col-lg-10 text">
+                                        <span>{{!entry.message}}</span>
+                                    </div>
+                                </div><!-- /.row -->
+                            </div><!-- /ng-repeat -->
+                        </div><!-- /ng-controller -->
+                    </div>
+                </div><!-- /.erebus-panel -->
+
+            </div><!-- /.col-lg-5 -->
+
+        </div>
+    </div> <!-- /wrapper -->
+    
+    <script src="/static/js/lib/angular.js"></script>
+    <script src="/static/js/lib/d3.min.js"></script>
+    <script src="/static/js/lib/jquery.min.js"></script>
+
+    <script src="/static/js/plugins/angular-websocket.js"></script>
+    <script src="/static/js/plugins/line-chart.min.js"></script>
+    <script src="/static/js/plugins/jquery.slimscroll.min.js"></script>
+    <script src="/static/js/plugins/jquery-scripts.js"></script>
+    
+    <script type="text/javascript">
+    'use strict';
+    angular
+        .module('erebus.config', [])
+        .constant('CONFIG', {
+            'server_address': "ws://{{ config['server.address'] }}:{{ config['server.port'] }}",
+            'ws': {
+                {% for item in config['websockets'] %}
+                    '{{ item }}': "{{ config['websockets'][item] }}",
+                {% end %}
+            }
+        });
+    </script>
+
+    <script src="/static/js/app/erebus.js"></script>
+
+    <script src="/static/js/app/factories/bandwidthWebsocket.js"></script>
+    <script src="/static/js/app/factories/logWebsocket.js"></script>
+    <script src="/static/js/app/factories/infoWebsocket.js"></script>
+
+    <script src="/static/js/app/controllers/bandwidth.js"></script>
+    <script src="/static/js/app/controllers/log.js"></script>
+    <script src="/static/js/app/controllers/info.js"></script>
+</body>
+</html>

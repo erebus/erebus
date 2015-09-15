@@ -1,0 +1,236 @@
+body {
+    background: #f2f2f2;
+}
+
+#page-wrapper {
+    width: 100%;
+    padding: 5px;
+}
+
+/* Top Navigation */
+
+.erebus-navbar {
+    background-color: #2c3e50;
+    border: 0;
+    border-bottom: 8px solid #27ae60;
+    border-radius: 0;
+    margin-bottom: 0px;
+}
+
+.erebus-logo {
+    height: 52px;
+    color: #fff;
+    margin: 0;
+    padding: 12px 35px;    
+    font-weight: 700;
+    font-size: 24px;
+    text-shadow: 3px 3px 0px rgba(0, 0, 0, 0.25);
+}
+
+.erebus-navbar .navbar-nav {
+    padding-left: 45px;
+    padding-right: 45px;
+}
+
+.erebus-navbar .navbar-nav li a,
+.erebus-navbar .navbar-nav li a:hover,
+.erebus-navbar .navbar-nav li.active a,
+.erebus-navbar .navbar-nav li.active a:hover {
+    height: 52px;
+    color: #fff;
+    font-size: 18px;
+    font-weight: 400;
+    padding: 15px 25px;
+}
+
+.erebus-navbar .navbar-nav li a:hover,
+.erebus-navbar .navbar-nav li.active a:hover,
+.erebus-navbar .navbar-nav li.active a {
+    background: #27ae60;
+}
+
+/* Sub navigation panel */
+
+#subnav {
+    background: #fff;
+    margin-bottom: 10px;
+    border-bottom: 1px solid #e3e3e3;
+}
+
+.erebus-info {
+    font-size: 14px;
+    padding: 10px 15px;
+    border-right: 1px solid #e3e3e3;
+}
+
+.erebus-info:last-of-type {
+    border-right: 0;
+}
+
+.erebus-info i {
+    font-size: 16px;
+}
+
+.status-online {
+    color: #2ecc71 !important;
+}
+
+.status-offline {
+    color: #bdc3c7 !important;
+}
+
+/* Panels */
+
+.erebus-panel {
+    background: #ffffff;
+    padding: 5px;
+    margin: 5px 5px 20px 5px;
+    border-radius: 6px;
+    border-left: 1px solid #e7e7e7;
+    border-bottom: 2px solid #e7e7e7;
+    border-right: 2px solid #e7e7e7;
+    border-top: 1px solid #e7e7e7;
+}
+
+.erebus-panel .panel-header {
+    padding: 1px 10px;
+    border-top: 0px solid #c278e1;
+    border-bottom: 1px solid #e7e7e7;
+}
+
+.erebus-panel .panel-header h6 {
+    font-size: 20px;
+    color: #853ea2;
+}
+
+.erebus-panel .panel-content {
+    background: #fff;
+    padding: 0;
+}
+
+.erebus-panel img {
+    width: 100%;
+}
+
+.erebus-panel .row {
+    margin: 0;
+}
+
+/* Graphs */
+
+#bw .erebus-info {
+    background: #fff;
+}
+
+#bw .read {
+    border-left: 6px solid #3498db;
+    border-top: 0px solid #e3e3e3;
+    border-bottom: 1px solid #e3e3e3;
+}
+
+#bw .written {
+    border-left: 6px solid #e74c3c;
+    border-bottom: 1px solid #e3e3e3;
+}
+
+#bw-graph {
+    height: 230px;
+    /*background: #f3f3f3 url('../chart-bg.png') repeat;*/
+    padding: 10px;
+    border-top: 1px solid #e3e3e3;
+    border-bottom: 1px solid #e3e3e3;
+}
+
+.graph {
+    width: 100%;
+    height: 300px;
+}
+
+.read-bytes, .written-bytes {
+    padding: 0 9px;
+    font-size: 12px;
+    border-radius: 2px;
+}
+
+.read-bytes {
+    background: #3498db;
+}
+
+.written-bytes {
+    background: #e74c3c;
+}
+
+/* Log console */
+
+#log-console {
+    height: 350px;
+    padding: 5px;
+    margin: 15px 10px;
+}
+
+#log-console .event {
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 16px;
+    border-bottom: 1px solid #e3e3e3;
+}
+
+#log-console .event:hover {
+    background: #ddeeff;
+}
+
+#log-console .event .row {
+    margin: 0;
+}
+
+#log-console .event .type {
+    text-align: center;
+    padding: 15px 0;
+}
+
+#log-console .event .type .badge {
+    width: 90%;
+    font-size: 14px;
+    padding: 5px;
+    margin-bottom: 5px;
+}
+
+#log-console .event .text {
+    min-height: 80px;
+    padding: 15px 10px;
+    border-left: 1px solid #e3e3e3;
+}
+
+#log-console .event .type .icon {
+    font-size: 32px;
+    line-height: 36px;
+}
+
+/* Event types */
+
+.debug {
+    background-color: #34495e;
+}
+
+.info {
+    background-color: #2980b9;
+}
+
+.notice {
+    background-color: #3498db;
+}
+
+.warn {
+    background-color: #f39c12;
+}
+
+.err {
+    background-color: #e74c3c;
+}
+
+/* Styling */
+
+.bold {
+    font-weight: bold;
+    color: #333;
+}
