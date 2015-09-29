@@ -17,7 +17,6 @@ function relayInfo($scope, infoWebsocket) {
             // Default values
             res = {'version': 'Unknown', 'nickname': 'Unnamed', 'fingerprint': '-'};
         }
-        console.log('relay info: ' + res);
         $scope.$apply(function () {
             $scope.info = res;
         });

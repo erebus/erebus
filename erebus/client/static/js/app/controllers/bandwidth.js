@@ -4,9 +4,9 @@ angular
     .module('erebus')
     .controller('bandwidthGraph', bandwidthGraph);
     
-bandwidthGraph.$inject = ['$scope', 'bandwidthWebsocket'];
+bandwidthGraph.$inject = ['$scope', '$modal', 'bandwidthWebsocket'];
     
-function bandwidthGraph($scope, bandwidthWebsocket) {
+function bandwidthGraph($scope, $modal, bandwidthWebsocket) {
     var max_value, graph_width = 60;
     var read_bytes = [], written_bytes = [], data = [];
     var stats = {}
@@ -64,16 +64,51 @@ function bandwidthGraph($scope, bandwidthWebsocket) {
         
         $scope.$apply(function () {
             $scope.data = data;
-            $scope.options['axes']['y']['max'] = max_value;
-            $scope.options['axes']['y2']['max'] = max_value;
             $scope.stats = stats;
+            if($scope.maxValue['autoAdjust']) {
+                $scope.options['axes']['y']['max'] = max_value;
+                $scope.options['axes']['y2']['max'] = max_value;
+            }
         });
     });
     
-    /*$scope.someFunc = function () {
-        bandwidthWebsocket.someFunc();
-        console.log('update sent');
-    }*/
+    $scope.changeMaxValue = function(max = 0) {
+        $scope.maxValue = {
+            'autoAdjust': false,
+            'custom': false,
+        }
+        if(max == 0) {
+            $scope.maxValue['autoAdjust'] = true;
+        } else {
+            $scope.maxValue['custom'] = true;
+            // Update the graph
+            $scope.options['axes']['y']['max'] = max;
+            $scope.options['axes']['y2']['max'] = max;
+            // Save this custom value
+            $scope.customMaxValue = max;
+        }
+    }
+    
+    // Open modal box to choose max
+    $scope.maxValueModalBox = function() {
+        // Angular UI modal (for bootstrap)
+        var modalInstance = $modal.open({
+            animation: true,
+            templateUrl: 'chooseMax.html',
+            controller: 'customMaxCtrl', // At the bottom of this file
+            size: 'sm',
+            resolve: { // Pass the current saved max value
+                customMaxValue: function() {
+                    return $scope.customMaxValue;
+                }
+            }
+        });
+
+        modalInstance.result.then(function (customValue) {
+            // Get the value and update 
+            $scope.changeMaxValue(customValue);
+        });
+    }
 
     function activate() {
         $scope.options = {
@@ -98,6 +133,12 @@ function bandwidthGraph($scope, bandwidthWebsocket) {
         $scope.data = []
         // Request bandwidth cache
         bandwidthWebsocket.getCache();
+        // Auto-adjust max value by default
+        $scope.maxValue = {
+            'autoAdjust': true,
+            'custom': false,
+        }
+        $scope.customMaxValue = 0;
     }
 }
 
@@ -112,4 +153,24 @@ function formatBytes(bytes, decimals) {
 
 function formatBytesPerSec(bytes, decimals) {
     return formatBytes(bytes, decimals) + '/sec';
+}
+
+
+// Small controller to handle the chooseMax modal box
+angular
+    .module('erebus')
+    .controller('customMaxCtrl', customMaxCtrl);
+    
+customMaxCtrl.$inject = ['$scope', '$modalInstance', 'customMaxValue'];
+    
+function customMaxCtrl($scope, $modalInstance, customMaxValue) {
+    // The current max value
+    $scope.value = customMaxValue;
+    $scope.update = function () {
+        // Return the choosen max value
+        $modalInstance.close($scope.value);
+    };
+    $scope.cancel = function () {
+        $modalInstance.dismiss('cancel');
+    };
 }
