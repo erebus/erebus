@@ -21,6 +21,7 @@ class DashboardHandler(cyclone.web.RequestHandler):
             'server.address': config.get('server.address'),
             'server.port': config.get('server.port'),
             'websockets': {},
+            'events.filter': config.get('startup.events'),
         }
         # Add server handlers as websockets addresses
         # Thus, the Angular app will know where to fetch info
