@@ -60,8 +60,30 @@
 
                 <!-- Bandwidth graph -->                
                 <div ng-controller="bandwidthGraph" id="bw" class="erebus-panel">
-                    <div class="panel-header">
-                        <h6><i class="fa fa-fw fa-bar-chart"></i> Live bandwidth usage</h6>
+                    <div class="row panel-header">
+                        <div class="col-lg-6">
+                            <h6><i class="fa fa-fw fa-bar-chart"></i> Live bandwidth usage</h6>
+                        </div>
+                        <div class="col-lg-6">
+                            
+                            <div class="btn-group pull-right erebus-settings" dropdown keyboard-nav>
+                                <button id="single-button" type="button" class="btn btn-primary btn-sm" dropdown-toggle ng-disabled="disabled">
+                                    Settings <span class="caret"></span>
+                                </button>
+                                <ul class="dropdown-menu" role="menu" aria-labelledby="single-button">
+                                    <li role="menuitem" ng-class="{selected: maxValue.autoAdjust}" data-ng-click="changeMaxValue()">
+                                        <a href="#"><i ng-if="maxValue.autoAdjust" class="fa fa-fw fa-check"></i> Auto adjust max value</a>
+                                    </li>
+                                    <li role="separator" class="divider"></li>
+                                    <li role="menuitem" ng-class="{selected: maxValue.custom}">
+                                        <a href="#" ng-click="maxValueModalBox()">
+                                            <i ng-if="maxValue.custom" class="fa fa-fw fa-check"></i> Custom max value
+                                        </a>
+                                    </li>
+                                </ul>
+                            </div><!-- /.btn-group .erebus-settings -->
+                            
+                        </div>
                     </div>
                     <div class="panel-content">
                         <div class="row">
@@ -107,19 +129,42 @@
                         </div>
                         <div class="clearfix"></div>
                     </div>
-                </div><!-- /.erebus-panel -->
+                </div><!-- /ng-controller -->
 
             </div><!-- /.col-lg-7 -->
             
             <div class="col-lg-5 col-xs-12">
 
                 <!-- Log console -->
-                <div class="erebus-panel">
-                    <div class="panel-header">
-                        <h6><i class="fa fa-fw fa-flag"></i> Log console</h6>
+                <div ng-controller="logConsole" class="erebus-panel">
+                    <div class="row panel-header">
+                        <div class="col-lg-6">
+                            <h6><i class="fa fa-fw fa-flag"></i> Log console</h6>
+                        </div>
+                        <div class="col-lg-6">
+                            
+                            <div class="btn-group pull-right erebus-settings" dropdown keyboard-nav>
+                                <button id="single-button" type="button" class="btn btn-primary btn-sm" dropdown-toggle ng-disabled="disabled">
+                                    Settings <span class="caret"></span>
+                                </button>
+                                <ul class="dropdown-menu" role="menu" aria-labelledby="single-button">
+                                    <li role="menuitem" ng-show="hideDuplicates">
+                                        <a href="#" data-ng-click="duplicates()"><i class="fa fa-fw fa-eye"></i> Show duplicates</a>
+                                    </li>
+                                    <li role="menuitem" ng-hide="hideDuplicates">
+                                        <a href="#" data-ng-click="duplicates()"><i class="fa fa-fw fa-eye-slash"></i> Hide duplicates</a>
+                                    </li>
+                                    <li role="separator" class="divider"></li>
+                                    <li role="menuitem">
+                                        <a href="#" ng-click="eventFiltering()"><i class="fa fa-fw fa-cog"></i> Log events filter</a>
+                                    </li>
+                                </ul>
+                            </div><!-- /.btn-group .erebus-settings -->
+
+                        </div>
                     </div>
                     <div class="panel-content">
-                        <div ng-controller="logDisplay" id="log-console">
+                        <div id="log-console">
                             <div ng-repeat="entry in entries" class="event">
                                 <div class="row">
                                     <div class="col-lg-2 type">
@@ -127,13 +172,14 @@
                                         <span>{{!entry.time}}</span>
                                     </div>
                                     <div class="col-lg-10 text">
+                                        <span ng-if="entry.count">({{!entry.count}})</span>
                                         <span>{{!entry.message}}</span>
                                     </div>
                                 </div><!-- /.row -->
                             </div><!-- /ng-repeat -->
                         </div><!-- /ng-controller -->
                     </div>
-                </div><!-- /.erebus-panel -->
+                </div><!-- /ng-controller -->
 
             </div><!-- /.col-lg-5 -->
 
@@ -143,6 +189,7 @@
     <script src="/static/js/lib/angular.js"></script>
     <script src="/static/js/lib/d3.min.js"></script>
     <script src="/static/js/lib/jquery.min.js"></script>
+    <script src="/static/js/lib/ui-bootstrap-tpls-0.13.4.min.js"></script>
 
     <script src="/static/js/plugins/angular-websocket.js"></script>
     <script src="/static/js/plugins/line-chart.min.js"></script>
@@ -159,15 +206,45 @@
                 {% for item in config['websockets'] %}
                     '{{ item }}': "{{ config['websockets'][item] }}",
                 {% end %}
-            }
+            },
+            'event_filters': "{{ config['events.filter'] }}",
         });
+    </script>
+    
+    <script type="text/ng-template" id="chooseMax.html">
+        <div class="modal-body">
+            Choose a custom maximum value for the Y axis of the graph:
+            <input type="text" size="4" ng-model="value" />
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-primary" type="button" ng-click="update()">Update</button>
+            <button class="btn btn-warning" type="button" ng-click="cancel()">Cancel</button>
+        </div>
+    </script>
+    
+    <script type="text/ng-template" id="eventFiltering.html">
+        <div class="modal-body">
+            <div class="btn-group">
+                <label class="btn btn-primary" ng-model="eventTypes.debug" btn-checkbox>Debug</label>
+                <label class="btn btn-primary" ng-model="eventTypes.info" btn-checkbox>Info</label>
+                <label class="btn btn-primary" ng-model="eventTypes.notice" btn-checkbox>Notice</label>
+                <label class="btn btn-primary" ng-model="eventTypes.warn" btn-checkbox>Warning</label>
+                <label class="btn btn-primary" ng-model="eventTypes.err" btn-checkbox>Error</label>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-primary" type="button" ng-click="update()">Update</button>
+            <button class="btn btn-warning" type="button" ng-click="cancel()">Cancel</button>
+        </div>
     </script>
 
     <script src="/static/js/app/erebus.js"></script>
 
     <script src="/static/js/app/factories/bandwidthWebsocket.js"></script>
-    <script src="/static/js/app/factories/logWebsocket.js"></script>
     <script src="/static/js/app/factories/infoWebsocket.js"></script>
+    <script src="/static/js/app/factories/logWebsocket.js"></script>
+    <script src="/static/js/app/factories/logEntry.js"></script>
+    <script src="/static/js/app/factories/logGroup.js"></script>
 
     <script src="/static/js/app/controllers/bandwidth.js"></script>
     <script src="/static/js/app/controllers/log.js"></script>

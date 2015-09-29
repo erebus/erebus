@@ -127,6 +127,10 @@ class WebSocketController:
                 logger = log.log_handler()
                 if logger is not None:
                     self.send_data(ws.ws_type(), logger.get_cache())
+            if message['request'] == 'LOG-FILTER':
+                logger = log.log_handler()
+                if logger is not None:
+                    log.update_filter()
 
     def bw_event(self, event):
         bw_stats = graph.bw_handler().get_info(event)

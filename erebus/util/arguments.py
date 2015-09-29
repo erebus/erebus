@@ -10,7 +10,7 @@ import stem.util.connection
 
 import erebus
 
-from erebus.server.handlers.log import TOR_EVENT_TYPES
+from erebus.server.handlers.log import TOR_EVENT_TYPES, TOR_RUNLEVELS
 from erebus.util import msg
 
 DEFAULT_ARGS = {
@@ -207,8 +207,7 @@ def expand_events(flags):
 
     expanded_events, invalid_flags = set(), ''
 
-    tor_runlevels = ['DEBUG', 'INFO', 'NOTICE', 'WARN', 'ERR']
-    erebus_runlevels = ['EREBUS_' + runlevel for runlevel in tor_runlevels]
+    erebus_runlevels = ['EREBUS_' + runlevel for runlevel in TOR_RUNLEVELS]
 
     for flag in flags:
         if flag == 'A':
@@ -230,7 +229,7 @@ def expand_events(flags):
                 runlevel_index = 4
 
             if flag in 'DINWE':
-                runlevels = tor_runlevels[runlevel_index:]
+                runlevels = TOR_RUNLEVELS[runlevel_index:]
             elif flag in '12345':
                 runlevels = erebus_runlevels[runlevel_index:]
 

@@ -1,10 +1,7 @@
 """
 log handler
 """
-import collections
 import datetime
-import os
-import re
 import time
 import threading
 
@@ -141,19 +138,11 @@ class LogHandler():
         return self._event(LogEntry(int(record.created), record.levelname, record.msg))
 
     def _event(self, event):
-        output = {'time': '', 'message': '', 'type': ''}
-
         if event.type not in self._logged_events:
             return
-
-        #self._event_log.add(event)
-        output['time'] = event.readable_time
-        output['message'] = event.message
-        output['type'] = event.type.lower()
-        # Finally, set message's type
-        output['reply'] = 'LOG-ENTRY'
-
-        return output
+        self._event_log.add(event)
+        return {'header': 'LOG-ENTRY', 'time': event.readable_time,
+                'type': event.type.lower(), 'message': event.message}
 
     def _init_erebus_log(self, listener):
         """
@@ -173,9 +162,7 @@ class LogHandler():
 
     def init_tor_log(self, listener):
         """
-        Configures tor to notify a function of these event types. If tor
-        is configured to notify this listener then the old listener is
-        replaced.
+        Configures tor to notify a function of its events.
         """
         controller = tor_controller()
         if controller is not None:
@@ -203,27 +190,27 @@ class LogHandler():
                 log.info(str(exc))
 
     def get_cache(self):
-        output = {'entries': []}
+        """
+        Return list of log entries that we have in memory
+        (Could be the log prepolation or the log entries we've stored
+        during execution of erebus)
+        """
+        output = {'header': 'LOG-CACHE', 'entries': []}
         for entry in list(self._event_log):
-            output['entries'].insert(0, {
-                'time': entry.readable_time,
-                'message': entry.message,
-                'type': entry.type.lower()
-            })
-        # Finally, set message's type
-        output['reply'] = 'LOG-CACHE'
-
+            output['entries'].insert(0, {'time': entry.readable_time,
+                                        'message': entry.message,
+                                        'type': entry.type.lower()})
         return output
+
 
 class LogGroup(object):
     """
     Thread safe collection of LogEntry instances, which maintains a
-    certain size and supports deduplication.
+    certain size.
     """
 
     def __init__(self, max_size, group_by_day=False):
         self._max_size = max_size
-        self._group_by_day = group_by_day
         self._entries = []
         self._lock = threading.RLock()
 
@@ -236,12 +223,6 @@ class LogGroup(object):
     def pop(self):
         with self._lock:
             last_entry = self._entries.pop()
-
-            # By design if the last entry is a duplicate it will also be
-            # the last item in its duplicate group.
-
-            if last_entry.is_duplicate:
-                last_entry.duplicates.pop()
 
     def __len__(self):
         with self._lock:
@@ -263,11 +244,6 @@ class LogEntry(object):
     :var int timestamp: unix timestamp for when the event occured
     :var str type: event type
     :var str message: event's message
-    :var str display_message: message annotated with our time and runlevel
-
-    :var bool is_duplicate: true if this matches other messages in the
-    group and isn't the first
-    :var list duplicates: messages that are identical to thsi one
     """
 
     def __init__(self, timestamp, type, message):
@@ -275,51 +251,9 @@ class LogEntry(object):
         self.type = type
         self.message = message
         entry_time = time.localtime(self.timestamp)
-        self.is_duplicate = False
-        self.duplicates = None
-        self.display_message = '%02i:%02i:%02i [%s] %s' % (entry_time[3],
-                                                            entry_time[4],
-                                                            entry_time[5],
-                                                            self.type,
-                                                            self.message)
         self.readable_time = '%02i:%02i:%02i' % (entry_time[3],
                                                 entry_time[4],
                                                 entry_time[5])
-
-    @lru_cache()
-    def is_duplicate_of(self, entry):
-        """
-        Checks if we are a duplicate of the given message or not.
-
-        :returns: **True** if the given log message is a duplicate of us
-        and **False** otherwise
-        """
-
-        if self.type != entry.type:
-            return False
-        elif self.message == entry.message:
-            return True
-
-        for msg in _common_log_messages().get(self.type, []):
-            # if it starts with an asterisk then check the whole message
-            # rather than just the start
-            if msg[0] == '*':
-                if msg[1:] in self.message and msg[1:] in entry.message:
-                    return True
-            else:
-                if self.message.startswith(msg) and entry.message.startswith(msg):
-                    return True
-
-        return False
-
-    def day_count(self):
-        """
-        Provides the day this event occured on by local time.
-
-        :reutrns: **int** with the day this occured on
-        """
-
-        return day_count(self.timestamp)
 
     def __eq__(self, other):
         if isinstance(other, LogEntry):
@@ -330,18 +264,6 @@ class LogEntry(object):
     def __hash__(self):
         return hash(self.display_message)
 
-
-def day_count(timestamp):
-    """
-    Provoides a unique number for the day a given timestamp falls on, by
-    local time. Daybreaks are rolled over at midnight.
-
-    :param int timestamp: unix timestamp to provide a count for
-
-    :reutrns: **int** for the day it falls on
-    """
-
-    return int((timestamp - TIMEZONE_OFFSET) / 86400)
 
 def log_file_path():
     """
@@ -429,25 +351,6 @@ def condense_runlevels(*events):
             result.append('EREBUS %s-%s' % (runlvl_range[0], runlvl_range[1]))
 
     return result + events
-
-@lru_cache()
-def _common_log_messages():
-    """
-    Provides a mapping of message types to its common log messages. These are
-    message prefixes unless it starts with an asterisk, in which case it can
-    appear anywhere in the message.
-
-    :returns: **dict** of the form {event_type => [msg1, msg2...]}
-    """
-
-    erebus_config, messages = conf.get_config('erebus'), {}
-
-    for conf_key in erebus_config.keys():
-        if conf_key.startswith('dedup.'):
-            event_type = conf_key[6:]
-            messages[event_type] = erebus_config.get(conf_key, [])
-
-    return messages
 
 def read_tor_log(path, read_limit=None):
     """
