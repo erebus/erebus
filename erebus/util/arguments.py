@@ -1,54 +1,66 @@
+# !/usr/bin/env python
+# -*- coding: utf-8 -*-
+#
+# This file is part of Erebus, a web dashboard for tor relays.
+#
+# :copyright:   (c) 2015, The Tor Project, Inc.
+#               (c) 2015, Damian Johnson
+#               (c) 2015, Cristobal Leiva
+#
+# :license: See LICENSE for licensing information.
+
 """
-Commandline argument parsing for erebus.
+Commandline argument parsing for erebus (based on nyx's parser).
 """
 
 import collections
 import getopt
 import os
 
-import stem.util.connection
+from stem.util import connection
 
-import erebus
-
+from erebus import __version__, __release_date__
 from erebus.server.handlers.log import TOR_EVENT_TYPES, TOR_RUNLEVELS
 from erebus.util import msg
 
+
 DEFAULT_ARGS = {
-    'server_address': None,
-    'user_provided_server_address': False,
-    'server_port': None,
-    'user_provided_server_port': False,
-    'listen_port': None,
-    'user_provided_listen_port': False,
-    'server_mode': False,
-    'client_mode': False,
-    'dual_mode': False,
+    # Args for connecting to erebus server (local or external)
+    'server_address': '127.0.0.1',
+    'server_port': 8887,
+
+    # Args for tor control connection
     'control_address': '127.0.0.1',
     'control_port': 9051,
-    'user_provided_port': False,
+    'custom_control_port': False,
     'control_socket': '/var/run/tor/control',
-    'user_provided_socket': False,
+    'custom_control_socket': False,
+
+    # Args for this instance of erebus
+    'port': 8889,
+    'custom_port': False,
     'config': os.path.expanduser('./erebus/config/erebusrc'),
     'debug_path': None,
     'logged_events': 'N3',
+    'erebus_mode': 'D',
+
+    'use_tls': False,
     'print_version': False,
     'print_help': False,
 }
 
-OPT = 'a:p:l:i:S:C:D:L:scdvh'
+OPT = 's:p:m:i:S:c:d:l:tvh'
 
 OPT_EXPANDED = [
-    'address=',
+    'server=',
     'port=',
-    'listen-port=',
+    'mode=',
     'interface=',
     'socket=',
     'config=',
     'debug=',
     'log=',
-    'server',
-    'client',
-    'dual',
+    'tls',
     'version',
     'help',
 ]
@@ -68,69 +80,103 @@ def parse(argv):
     args = dict(DEFAULT_ARGS)
 
     try:
-        recognized_args, unrecognized_args = getopt.getopt(argv, OPT, OPT_EXPANDED)
-        if unrecognized_args:
-            error_msg = "aren't recognized arguments" if len(unrecognized_args) > 1 else "isn't a recognized argument"
-            raise getopt.GetoptError("'%s' %s" % ("', '".join(unrecognized_args), error_msg))
+        valid_args, invalid_args = getopt.getopt(argv, OPT, OPT_EXPANDED)
+        if invalid_args:
+            raise getopt.GetoptError(msg(
+                'usage.invalid_args', args="', '".join(invalid_args)))
     except getopt.GetoptError as exc:
-        raise ValueError(msg('usage.invalid_arguments', error=exc))
+        raise ValueError(msg('usage.please_use_help', error=exc))
 
-    for opt, arg in recognized_args:
-        if opt in ('-a', '--address'):
-            if not stem.util.connection.is_valid_ipv4_address(arg):
-                raise ValueError(msg('usage.not_a_valid_address', address_input=arg))
+    for opt, arg in valid_args:
+        # A valid address and port indicating where to connect to erebus
+        # server (in other words, where the client should point when
+        # calling for websockets).
+        # This arg is of the form: [ADDRESS:]PORT
+        if opt in ('-s', '--server'):
+            if ':' in arg:
+                server_address, server_port = arg.split(':', 1)
+            else:
+                server_address, server_port = None, arg
 
-            args['server_address'] = arg
-            args['user_provided_server_address'] = True
+            if server_address is not None:
+                if not connection.is_valid_ipv4_address(server_address):
+                    raise ValueError(msg(
+                        'usage.not_a_valid_address', address=server_address))
+
+                args['server_address'] = server_address
+
+            if not connection.is_valid_port(server_port):
+                raise ValueError(msg(
+                    'usage.not_a_valid_port', port=server_port))
+
+            args['server_port'] = int(server_port)
+
+        # A valid port where this instance of erebus will run, either
+        # erebus is running on server or client mode (or both)
         elif opt in ('-p', '--port'):
-            if not stem.util.connection.is_valid_port(arg):
-                raise ValueError(msg('usage.not_a_valid_port', port_input=arg))
+            if not connection.is_valid_port(arg):
+                raise ValueError(msg('usage.not_a_valid_port', port=arg))
 
-            args['server_port'] = int(arg)
-            args['user_provided_server_port'] = True
-        elif opt in ('-l', '--listen-port'):
-            if not stem.util.connection.is_valid_port(arg):
-                raise ValueError(msg('usage.not_a_valid_port', port_input=arg))
+            args['port'] = int(arg)
+            args['custom_port'] = True
 
-            args['listen_port'] = int(arg)
-            args['user_provided_listen_port'] = True
+        # Mode in which erebus should run.
+        # Valid options are (D)ual, (S)erver, (C)lient.
+        elif opt in ('-m', '--mode'):
+            if len(arg) == 1 and arg in 'DSC':
+                args['erebus_mode'] = arg
+
+        # A valid address and port indicating where to connect to tor control.
+        # This arg is of the form: [ADDRESS:]PORT
         elif opt in ('-i', '--interface'):
             if ':' in arg:
-                address, port = arg.split(':', 1)
+                control_address, control_port = arg.split(':', 1)
             else:
-                address, port = None, arg
+                control_address, control_port = None, arg
 
-            if address is not None:
-                if not stem.util.connection.is_valid_ipv4_address(address):
-                    raise ValueError(msg('usage.not_a_valid_address', address_input=address))
+            if control_address is not None:
+                if not connection.is_valid_ipv4_address(control_address):
+                    raise ValueError(msg(
+                        'usage.not_a_valid_address', address=control_address))
 
-                args['control_address'] = address
+                args['control_address'] = control_address
 
-            if not stem.util.connection.is_valid_port(port):
-                raise ValueError(msg('usage.not_a_valid_port', port_input=port))
+            if not connection.is_valid_port(control_port):
+                raise ValueError(msg(
+                    'usage.not_a_valid_port', port=control_port))
 
-            args['control_port'] = int(port)
-            args['user_provided_port'] = True
+            args['control_port'] = int(control_port)
+            args['custom_control_port'] = True
+
+        # Unix socket path to connect to tor control.
+        # Example: /var/run/tor/control
         elif opt in ('-S', '--socket'):
             args['control_socket'] = arg
-            args['user_provided_socket'] = True
-        elif opt in ('-C', '--config'):
+            args['custom_control_socket'] = True
+
+        # Path where to look for a config file.
+        # Example: ./erebus/config/erebusrc
+        elif opt in ('-c', '--config'):
             args['config'] = arg
-        elif opt in ('-D', '--debug'):
+
+        # Path where to write erebus logs
+        elif opt in ('-d', '--debug'):
             args['debug_path'] = os.path.expanduser(arg)
-        elif opt in ('-L', '--log'):
+
+        # Flags of event types to be logged. See expand_events for further
+        # details.
+        elif opt in ('-l', '--log'):
             try:
                 expand_events(arg)
             except ValueError as exc:
-                raise ValueError(msg('usage.unrecognized_log_flags', flags=exc))
+                raise ValueError(msg('usage.invalid_log_flags', flags=exc))
 
             args['logged_events'] = arg
-        elif opt in ('-s', '--server'):
-            args['server_mode'] = True
-        elif opt in ('-c', '--client'):
-            args['client_mode'] = True
-        elif opt in ('-d', '--dual'):
-            args['dual_mode'] = True
+
+        # Should we use encrypted HTTP communications
+        elif opt in ('-t', '--tls'):
+            args['use_tls'] = True
+        # Print version and help
         elif opt in ('-v', '--version'):
             args['print_version'] = True
         elif opt in ('-h', '--help'):
@@ -163,14 +209,10 @@ def get_version():
     """
     Provides our --version information.
 
-    :returns: **str** with our versioning information
+    :returns: **str** with our versioning information.
     """
 
-    return msg(
-        'usage.version_output',
-        version=erebus.__version__,
-        date=erebus.__release_date__,
-    )
+    return msg('usage.version', version=__version__, date=__release_date__)
 
 
 def expand_events(flags):

@@ -1,7 +1,21 @@
+# !/usr/bin/env python
+# -*- coding: utf-8 -*-
+#
+# This file is part of Erebus, a web dashboard for tor relays.
+#
+# :copyright:   (c) 2015, The Tor Project, Inc.
+#               (c) 2015, Damian Johnson
+#               (c) 2015, Cristobal Leiva
+#
+# :license: See LICENSE for licensing information.
+
 """
+Handler for erebus controller, which is in charge of starting a tor
+control connection if tor is up, or wait and retry periodically to connect
+again.
 """
+
 import stem
-import time
 
 from twisted.internet import task
 
@@ -10,9 +24,7 @@ from stem.util import conf, log
 
 from erebus.server.handlers.graph import init_bw_handler
 from erebus.server import websockets
-from erebus.util import uses_settings, init_tor_controller, tor_controller
-
-EREBUS_CONTROLLER = None
+from erebus.util import msg, init_tor_controller, tor_controller, uses_settings
 
 
 def conf_handler(key, value):
@@ -20,119 +32,127 @@ def conf_handler(key, value):
         return max(15, value)
 
 CONFIG = conf.config_dict('erebus', {
-    'startup.events': 'N3',
     'conn.loopInterval': 10,
-    'start_time': 0,
 }, conf_handler)
+
+EREBUS_CONTROLLER = None
 
 
 def erebus_controller():
     """
-    Provides the erebus controller instance.
+    Provides the EREBUS_CONTROLLER singleton.
+
+    :returns: :class:`~erebus.util.controller.Controller`
     """
 
     return EREBUS_CONTROLLER
 
 
-def init_controller(control_port, control_socket, logged_events):
+def init_controller(control_port, control_socket):
     """
-    Spawns the controller
+    Initializes the erebus controller instance.
+
+    :param tuple control_port: tuple of the form (address, port)
+    :param str control_socket: string with path to control socket.
     """
 
     global EREBUS_CONTROLLER
-    EREBUS_CONTROLLER = Controller(control_port, control_socket, logged_events)
+    EREBUS_CONTROLLER = Controller(control_port, control_socket)
 
 
 class Controller:
     """
-    Tracks the global state of Erebus controller
+    Tracks the state of the connection to tor control.
     """
 
-    def __init__(self, control_port, control_socket, logged_events):
+    def __init__(self, control_port, control_socket):
         """
-        Creates a new controller instance. Connect to Tor, setup WebSockets.
+        Sets default values and starts a loop task to connect to tor control.
 
-        Arguments:
-            control_port - tuple with control address and control port
-            control_socket - path to control socket
+        :var tuple _control_port: tuple of the form (address, port)
+        :var str _control_socket: string with path to control socket.
         """
 
         self._loop_call = None
         self._control_port = control_port
         self._control_socket = control_socket
-        self._logged_events = logged_events
 
-        # Try to establish a connection with Tor control
         self._start_loop_check()
 
     @uses_settings
     def _start_loop_check(self, config):
         """
-        Starts a looping task to periodically check for Tor controller
-        connection. This looping task should be called when connection to
-        Tor controller is off.
+        Starts a looping task to periodically check for tor control
+        connection.
         """
 
         if self._loop_call is None:
             self._loop_call = task.LoopingCall(self._conn_starter)
         try:
+            # The loop task repeats itself every `loopInterval` seconds.
             self._loop_call.start(CONFIG['conn.loopInterval'])
         except AssertionError as exc:
-            log.warn('The loop check is already running: %s' % exc)
+            log.warn(msg('setup.already_looping', detail=exc))
 
     def _conn_starter(self):
         """
-        Looping task to be (periodically) called from self._start_loop_check()
-        If the connection is made, stop the looping task.
+        Function to be called from the looping task at _start_loop_check()
+        If a connection is made, then stop the looping task.
         """
 
         controller = tor_controller()
         if controller is None or not controller.is_alive():
             self._start_tor_controller()
+            log.notice(msg(
+                'notice.try_to_connect', interval=CONFIG['conn.loopInterval']))
         else:
-            # Stop the looping task when is started
             self._loop_call.stop()
 
     def _conn_listener(self, controller, state, timestamp):
         """
-        Connection listener. If Tor control is disconnected, then try to
-        reconnect.
+        Function to be called when tor control connection changes its
+        state. If the new state is CLOSED, then try to reconnect.
 
-        Arguments:
-        controller, state, timestamp - these are delivered by stem's
-        status listener
+        :param Class controller: :class:`~stem.control.BaseController`.
+        :param Class state: :class:`~stem.control.State` enumeration for
+          states that a controller can have.
+        :param float timestamp: Unix timestamp.
         """
 
         if state == State.CLOSED:
-            log.notice('Tor control connection closed')
+            log.notice(msg('notice.control_conn_closed'))
             self._start_loop_check()
 
     def _start_tor_controller(self):
         """
-        Start a new connection with Tor control
+        Starts a new connection with tor control.
         """
 
         controller = init_tor_controller(
             control_port=self._control_port,
             control_socket=self._control_socket
         )
-        if controller is not None:
-            log.notice('New connection with Tor established.')
 
+        if controller is not None:
+            log.notice(msg('notice.new_connection'))
+
+            # If the connection to tor control is made, then start
+            # logging tor events.
             ws_controller = websockets.ws_controller()
             ws_controller.listen_tor_log()
+            # Setup the handler to start listening for bandwidth events
             init_bw_handler()
 
             try:
-                # Listen for bandwidth events
-                controller.add_event_listener(ws_controller.bw_event, EventType.BW)
-                # Listen for changes in status of Tor control connection
+                # Bandwidth events
+                controller.add_event_listener(
+                    ws_controller.bw_event, EventType.BW)
+                # Tor control connection state
                 controller.add_status_listener(ws_controller.reset_listener)
                 controller.add_status_listener(self._conn_listener)
-                # Finally, send useful information to the client
+                # Once everything is OK, send useful relay information
+                # to the client.
                 ws_controller.startup_info()
+
             except stem.ProtocolError as exc:
-                log.warn('Unable to attach listeners: %s' % exc)
-        else:
-            log.notice('Unable to start establish a connection with Tor \
-            control. Retrying in %s seconds.' % CONFIG['conn.loopInterval'])
+                log.warn(msg('warn.unable_to_attach', reason=exc))

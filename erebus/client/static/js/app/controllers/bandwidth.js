@@ -1,3 +1,13 @@
+/*
+* This file is part of Erebus, a web dashboard for tor relays.
+*
+* :copyright:   (c) 2015, The Tor Project, Inc.
+*               (c) 2015, Damian Johnson
+*               (c) 2015, Cristobal Leiva
+*
+* :license: See LICENSE for licensing information.
+*/
+
 'use strict';
 
 angular
@@ -23,7 +33,7 @@ function bandwidthGraph($scope, $modal, bandwidthWebsocket) {
         }
 
         // Push single or several entries according to type of reply
-        if(res.reply == 'BW-CACHE') {
+        if(res.header == 'BW-CACHE') {
             for(i in res.entries) {
                 read_bytes.unshift(res.entries[i].read);
                 written_bytes.unshift(res.entries[i].written);

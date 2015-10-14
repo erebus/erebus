@@ -201,7 +201,7 @@
     angular
         .module('erebus.config', [])
         .constant('CONFIG', {
-            'server_address': "ws://{{ config['server.address'] }}:{{ config['server.port'] }}",
+            'server_address': "{{ config['websockets.protocol'] }}://{{ config['server.address'] }}:{{ config['server.port'] }}",
             'ws': {
                 {% for item in config['websockets'] %}
                     '{{ item }}': "{{ config['websockets'][item] }}",

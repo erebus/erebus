@@ -1,20 +1,37 @@
+# !/usr/bin/env python
+# -*- coding: utf-8 -*-
+#
+# This file is part of Erebus, a web dashboard for tor relays.
+#
+# :copyright:   (c) 2015, The Tor Project, Inc.
+#               (c) 2015, Damian Johnson
+#               (c) 2015, Cristobal Leiva
+#
+# :license: See LICENSE for licensing information.
+
 """
+Parses arguments, starts the web application and connects to tor control
+protocol (if tor is up).
 """
+
 import logging
 import os
+import platform
+import stem
 import sys
 import time
 
-import erebus.util.arguments
-import erebus.util.controller
+import erebus
 import erebus.webapp
 
-from twisted.internet import reactor
+from twisted.internet import reactor, ssl
 from stem.util import conf, log
 
 from erebus.server import websockets
+from erebus.util import arguments, controller
 from erebus.util import uses_settings, dual_mode, set_dual_mode, msg
 
+# Default arguments are intended for a local tor instance
 CONFIG = conf.config_dict('erebus', {
     'server.address': '127.0.0.1',
     'server.port': 8887,
@@ -27,108 +44,110 @@ def main(config):
     config.set('start_time', str(int(time.time())))
 
     try:
-        args = erebus.util.arguments.parse(sys.argv[1:])
+        args = arguments.parse(sys.argv[1:])
         config.set('startup.events', args.logged_events)
     except ValueError as exc:
         print(exc)
         sys.exit(1)
 
     if args.print_help:
-        print(erebus.util.arguments.get_help())
+        print(arguments.get_help())
         sys.exit()
     elif args.print_version:
-        print(erebus.util.arguments.get_version())
+        print(arguments.get_version())
         sys.exit()
 
     if args.debug_path is not None:
         try:
             _setup_debug_logging(args)
-            print(msg('debug.saving_to_path', path=args.debug_path))
+            print msg('debug.saving_to_path', path=args.debug_path)
         except IOError as exc:
-            print(msg(
-                'debug.unable_to_write_file',
-                path=args.debug_path,
-                error=exc.strerror
-            ))
+            print msg(
+                'debug.unable_to_write_file', path=args.debug_path,
+                error=exc.strerror)
             sys.exit(1)
 
     control_port = (args.control_address, args.control_port)
     control_socket = args.control_socket
 
     # If the user specified an endpoint then just try to connect to that.
-    if args.user_provided_socket and not args.user_provided_port:
+    if args.custom_control_socket and not args.custom_control_port:
         control_port = None
-    elif args.user_provided_port and not args.user_provided_socket:
+    elif args.custom_control_port and not args.custom_control_socket:
         control_socket = None
 
-    # Check if user wants to run erebus in dual mode (both server and
-    # client in the same port. If that is the case, activate dual mode
-    # and make server as primary option to run (since server would
-    # import client functionality)
+    # Check the mode in which the user wants to run erebus. If the mode
+    # is dual, then all of the client functionalities will be imported
+    # by the server.
     run_server = True
-    if args.dual_mode:
+    if args.erebus_mode == 'D':
         set_dual_mode()
-    else:
-        # If the user specified client mode.
-        if args.client_mode and not args.server_mode:
-            run_server = False
-        elif args.client_mode and args.server_mode:
-            set_dual_mode()
-        # In any other case, server mode is default
+    elif args.erebus_mode == 'C':
+        run_server = False
+
+    server_port = args.server_port
+    server_address = args.server_address
 
     if run_server:
-        # Init empty list of websockets and start logging erebus events
         ws_controller = websockets.init_websockets()
-        ws_controller.listen_erebus_log(erebus.util.arguments.expand_events(config.get('startup.events')))
-        # Init erebus controller (and Tor controller, if connected)
-        erebus.util.controller.init_controller(
-            control_port,
-            control_socket,
-            config.get('startup.events'),
-        )
-        # server app
+        ws_controller.listen_erebus_log(
+            arguments.expand_events(config.get('startup.events')))
+        # Try to connect to tor instance. If erebus is unable to connect
+        # to tor, it will start an asynchronous loop task to retry
+        # connecting every X seconds.
+        controller.init_controller(control_port, control_socket)
+
+        if args.custom_port:
+            server_port = args.port
+
+        # The web app will listen on this port
+        listen_port = server_port
         app = erebus.webapp.Application()
-        # Check if user specified a server port
-        if args.user_provided_server_port:
-            config.set('server.port', str(args.server_port))
-        listen_port = CONFIG['server.port']
-
-        if dual_mode():
-            log.debug('Running in dual mode')
-        else:
-            log.debug('Running in server mode')
     else:
-        # client app
-        app = erebus.webapp.Application(True)
-        # Check if user specified listen (client) port
-        if args.user_provided_listen_port:
-            config.set('client.port', str(args.listen_port))
-        listen_port = CONFIG['client.port']
+        # The web app will listen on this port
+        listen_port = args.port
+        app = erebus.webapp.Application(is_client=True)
 
-        log.debug('Running in client mode')
+    # Independently of the port where the web app will run (listen port),
+    # we must know to what address:port should erebus connect to fetch
+    # info from server.
+    config.set('client.port', str(args.port))
+    config.set('server.port', str(server_port))
+    config.set('server.address', server_address)
 
-    # This is where we are going to connect for fetching data
-    # (different from listen port, where the app will run)
-    if args.user_provided_server_port:
-        config.set('server.port', str(args.server_port))
-    if args.user_provided_server_address:
-        config.set('server.address', args.server_address)
+    # Useful info
+    mode_str = 'dual' if dual_mode() else 'server' if run_server else 'client'
+    running_msg = msg('info.running_on', port=listen_port, mode=mode_str)
+    server_msg = msg(
+        'info.server', protocol='https' if args.use_tls else 'http',
+        address=server_address, port=server_port)
 
-    server_port = CONFIG['server.port']
-    server_address = CONFIG['server.address']
+    log.info(running_msg)
+    log.info(server_msg)
 
-    log.debug('Erebus is running on port %s' % listen_port)
-    log.debug('Erebus server is located at: %s:%s' % (server_address,
-                                                    server_port))
+    print running_msg
+    print server_msg
 
-    reactor.listenTCP(listen_port, app)
+    if args.use_tls:
+        reactor.listenSSL(
+            listen_port, app,
+            ssl.DefaultOpenSSLContextFactory(
+                # TODO: specify custom files
+                'erebus_key.pem', 'erebus_cert.pem'),
+            interface=server_address)
+    else:
+        reactor.listenTCP(listen_port, app)
+
+    config.set('websockets.protocol', 'wss' if args.use_tls else 'ws')
+
     reactor.run()
 
 
 def _setup_debug_logging(args):
     """
-    Configures us to log at stem's trace level to a debug log path.
-    This starts it off with some general diagnostic information.
+    Log at stem's trace level to a debug log path.
+
+    :param tuple args: a named tuple with our parsed arguments
     """
 
     debug_dir = os.path.dirname(args.debug_path)
@@ -154,6 +173,17 @@ def _setup_debug_logging(args):
                 erebusrc_content = erebusrc_file.read()
         except IOError as exc:
             erebusrc_content = '[unable to read file: %s]' % exc.strerror
+
+    log.trace(msg(
+        'debug.header',
+        erebus_version=erebus.__version__,
+        stem_version=stem.__version__,
+        python_version='.'.join(map(str, sys.version_info[:3])),
+        system=platform.system(),
+        platform=' '.join(platform.dist()),
+        erebusrc_path=args.config,
+        erebusrc_content=erebusrc_content,
+      ))
 
 
 if __name__ == '__main__':

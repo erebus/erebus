@@ -1,3 +1,14 @@
+# !/usr/bin/env python
+# -*- coding: utf-8 -*-
+#
+# This file is part of Erebus, a web dashboard for tor relays.
+#
+# :copyright:   (c) 2015, The Tor Project, Inc.
+#               (c) 2015, Damian Johnson
+#               (c) 2015, Cristobal Leiva
+#
+# :license: See LICENSE for licensing information.
+
 """
 General purpose utilities.
 """
@@ -10,11 +21,12 @@ import stem.util.conf
 import stem.util.enum
 import stem.util.log
 
-TOR_CONTROLLER = None
-LOG_HANDLER = None
+
 BASE_DIR = os.path.sep.join(__file__.split(os.path.sep)[:-2])
-TESTING = False
-DUAL_MODE = False
+
+DUAL_MODE, TESTING = False, False
+
+TOR_CONTROLLER, LOG_HANDLER = None, None
 
 try:
     uses_settings = stem.util.conf.uses_settings(
@@ -26,7 +38,7 @@ except IOError as exc:
 
 def tor_controller():
     """
-    Singleton for getting our tor controller connection.
+    Provides the TOR_CONTROLLER singleton.
 
     :returns: :class:`~stem.control.Controller`
     """
@@ -36,8 +48,8 @@ def tor_controller():
 
 def init_tor_controller(*args, **kwargs):
     """
-    Sets the Controller used by rwsd. This is a passthrough for Stem's
-    :func:`~stem.connection.connect` function.
+    Initializes the tor controller instance. This is a passthrough for
+    Stem's :func:`~stem.connection.connect` function.
 
     :returns: :class:`~stem.control.Controller`
     """
@@ -50,7 +62,7 @@ def init_tor_controller(*args, **kwargs):
 @uses_settings
 def msg(message, config, **attr):
     """
-    Provides the given message.
+    Provides the given message read from strings config file.
 
     :param str message: message handle to log
     :param dict attr: attributes to format the message with
@@ -73,8 +85,9 @@ def msg(message, config, **attr):
 
 def dual_mode():
     """
-    Whether to run erebus in separated scripts (server and clients in
-    different ports) or in dual mode (both on same port)
+    Whether to run erebus with server or client functionalities, or both.
+
+    :returns: **bool** answer
     """
 
     return DUAL_MODE
@@ -82,7 +95,7 @@ def dual_mode():
 
 def set_dual_mode():
     """
-    Set dual mode to True.
+    Sets DUAL_MODE to True.
     """
 
     global DUAL_MODE

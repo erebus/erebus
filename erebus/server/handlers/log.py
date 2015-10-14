@@ -1,14 +1,28 @@
+# !/usr/bin/env python
+# -*- coding: utf-8 -*-
+#
+# This file is part of Erebus, a web dashboard for tor relays.
+#
+# :copyright:   (c) 2015, The Tor Project, Inc.
+#               (c) 2015, Damian Johnson
+#               (c) 2015, Cristobal Leiva
+#
+# :license: See LICENSE for licensing information.
+
 """
-log handler
+Log handler for both erebus and tor. This will notify the client of
+erebus events and tor events (if tor is up). It also supports prepopulation.
 """
+
 import datetime
+import stem
 import time
 import threading
 
 from stem.response import events
 from stem.util import conf, log, system
 
-from erebus.util import tor_controller
+from erebus.util import msg, tor_controller
 
 try:
     # added in python 3.2
@@ -18,20 +32,22 @@ except ImportError:
 
 
 def conf_handler(key, value):
-    if key == 'log.prepopulate.limit':
+    if key == 'log.populate.limit':
         return max(0, value)
     elif key == 'log.cache.size':
-        return max(20, value)
+        return max(0, value)
 
 
 CONFIG = conf.config_dict('erebus', {
-    'log.prepopulate.limit': 20,
-    'log.cache.size': 20,
+    'log.populate.limit': 100,
+    'log.cache.size': 100,
     'tor.chroot': '',
 }, conf_handler)
 
 TIMEZONE_OFFSET = time.altzone if time.localtime()[8] else time.timezone
+
 TOR_RUNLEVELS = ['DEBUG', 'INFO', 'NOTICE', 'WARN', 'ERR']
+
 TOR_EVENT_TYPES = {
     'd': 'DEBUG',
     'i': 'INFO',
@@ -63,92 +79,158 @@ LOG_HANDLER = None
 
 def log_handler():
     """
-    Singleton for getting our log hander.
+    Provides the LOG_HANDLER singleton.
 
     :returns: :class:`~erebus.server.handlers.log.LogHandler`
     """
+
     return LOG_HANDLER
+
 
 def init_log_handler(logged_events, listener):
     """
+    Initializes the log handler instance, which needs to be tracked
+    by the websockets controller.
+
+    :param set logged_events: **set** of event types to listen.
+    :param func listener: function to be notified when logged_events occur.
     """
+
     global LOG_HANDLER
     LOG_HANDLER = LogHandler(logged_events, listener)
 
-def missing_event_types():
-    """
-    Provides the event types the current tor connection supports but erebus
-    doesn't. This provides an empty list if no event types are missing or the
-    GETINFO query fails.
-
-    :returns: **list** of missing event types
-    """
-    response = None
-    controller = tor_controller()
-    response = controller.get_info('events/names', []) if controller else []
-
-    tor_event_types = response.split(' ')
-    recognized_types = TOR_EVENT_TYPES.values()
-    return list(filter(lambda x: x not in recognized_types, tor_event_types))
-
 
 class LogHandler():
+    """
+    Log handler. It tracks both erebus and tor events.
+    """
 
     def __init__(self, logged_events, listener):
-        self._event_log = LogGroup(CONFIG['log.cache.size'], group_by_day=True)
+        """
+        Saves which events are going to be listened, for both erebus and
+        tor as well as for each one on its own. Once the events are set,
+        it starts listening for erebus events.
+
+        :param set logged_events: set of event types to listen.
+        :param func listener: function to be notified when logged_events
+          occur.
+        """
+
         self._tor_events = self._get_tor_events(logged_events)
         self._erebus_events = self._get_erebus_events(logged_events)
         self._logged_events = self._get_all_events()
 
+        # Log cache.
+        self._event_log = LogGroup(CONFIG['log.cache.size'])
+
         self._init_erebus_log(listener)
 
     def _get_erebus_events(self, events):
+        """
+        Receives a set of events to be listened for, and check which one
+        of them is a valid erebus event (event of the form EREBUS_%s)
+
+        :param set events: set of event types to check.
+        :returns: sorted set of valid erebus events.
+        """
+
         events = set(events)
         erebus_events = events.intersection(
-            set(['EREBUS_%s' % runlevel for runlevel in TOR_RUNLEVELS])
-        )
+            set(['EREBUS_%s' % runlevel for runlevel in TOR_RUNLEVELS]))
         return sorted(erebus_events)
 
     def _get_tor_events(self, events):
+        """
+        Receives a set of events to be listened for, and check which one
+        of them is a valid tor event. If we are listening for UNKNOWN
+        events, then it adds missing event types to the set.
+
+        :param set events: set of event types to check.
+        :returns: sorted set of valid tor events.
+        """
+
         events = set(events)
         tor_events = events.intersection(set(TOR_EVENT_TYPES.values()))
-        # adds events unrecognized by erebus if we're listening to the
-        # 'UNKNOWN' type
+
+        # If listening to 'UNKNOWN' event type
         if 'UNKNOWN' in events:
             tor_events.update(set(missing_event_types()))
+
         return sorted(tor_events)
 
     def _get_all_events(self):
+        """
+        Retrieves all valid events that we are listening for.
+
+        :returns: set of valid events of both tor and erebus.
+        """
+
         erebus_events = set(self._erebus_events)
         tor_events = set(self._tor_events)
         return sorted(tor_events.union(erebus_events))
 
     def _tor_event(self, event):
-        msg = ' '.join(str(event).split(' ')[1:])
+        """
+        Receives an event record sent by tor and returns a log entry ready
+        to be sent to the client.
 
+        :param Class event: a valid :class:`~stem.response.` subclass.
+        :returns: dictionary with log entry information.
+        """
+
+        msg_str = ' '.join(str(event).split(' ')[1:])
         if isinstance(event, events.BandwidthEvent):
-            msg = 'READ: %i, WRITTEN: %i' % (event.read, event.written)
+            msg_str = 'READ: %i, WRITTEN: %i' % (event.read, event.written)
         elif isinstance(event, events.LogEvent):
-            msg = event.message
+            msg_str = event.message
 
-        return self._event(LogEntry(event.arrived_at, event.type, msg))
+        # Pass a valid log entry to _event function
+        return self._event(LogEntry(event.arrived_at, event.type, msg_str))
 
     def _erebus_event(self, record):
-        # 'EREBUS_%s' % record.levelname
-        return self._event(LogEntry(int(record.created), record.levelname, record.msg))
+        """
+        Receives an event record sent by erebus and returns a log entry
+        ready to be sent to the client.
 
-    def _event(self, event):
-        if event.type not in self._logged_events:
+        :param record: log entry formatted by `~stem.util.log`
+        :returns: dictionary with log enty information
+        """
+
+        # Pass a valid log entry to _event function
+        return self._event(
+            LogEntry(int(record.created), record.levelname, record.msg))
+
+    def _event(self, entry):
+        """
+        Common function for both tor and erebus events to convert them
+        in a valid log entry (dictionary) to be sent to the client.
+        This dictionary, when returned, is transformed into JSON by
+        the websocket controller.
+
+        :param Class entry: :class:`~erebus.server.handlers.log.LogEntry`
+        :returns: dictionary with log entry information.
+        """
+
+        # First of all, check if we are listening to this event
+        if entry.type not in self._logged_events:
             return
-        self._event_log.add(event)
-        return {'header': 'LOG-ENTRY', 'time': event.readable_time,
-                'type': event.type.lower(), 'message': event.message}
+
+        # Save log entry in our cache.
+        self._event_log.add(entry)
+
+        return {
+            'header': 'LOG-ENTRY',
+            'time': entry.readable_time,
+            'type': entry.type.lower(),
+            'message': entry.message
+        }
 
     def _init_erebus_log(self, listener):
         """
-        Configures erebus to notify a function of its events.
+        Initializes erebus log by adding a listener to be notified of logged
+        erebus events.
 
-        :param function listener: listener to be notified
+        :param function listener: listener to be notified.
         """
 
         stem_log = log.get_logger()
@@ -162,54 +244,71 @@ class LogHandler():
 
     def init_tor_log(self, listener):
         """
-        Configures tor to notify a function of its events.
+        Initializes tor log by adding a  listener to be notified of logged
+        tor events. In addition, prepopulates the log cache.
+
+        :param function listener: listener to be notified.
         """
+
         controller = tor_controller()
-        if controller is not None:
-            controller.remove_event_listener(listener)
-            for event_type in self._tor_events:
-                try:
-                    controller.add_event_listener(listener, event_type)
-                except stem.ProtocolError:
-                    self._event_types.remove(event_type)
-            self._prepopulate()
+        controller.remove_event_listener(listener)
+        for event_type in self._tor_events:
+            try:
+                controller.add_event_listener(listener, event_type)
+            except stem.ProtocolError:
+                self._event_types.remove(event_type)
+
+        # Populates the log cache from tor log file.
+        self._prepopulate()
 
     def _prepopulate(self):
         """
-        Prepopulate log
+        Populates our log cache if tor log file is available. The population
+        of logs has a limit.
         """
-        log_location = log_file_path()
-        if log_location:
+
+        log_path = log_file_path()
+        if log_path:
             try:
-                for entry in reversed(list(read_tor_log(log_location, CONFIG['log.prepopulate.limit']))):
+                entries = list(read_tor_log(
+                    log_path, CONFIG['log.populate.limit']))
+
+                for entry in reversed(entries):
                     if entry.type in self._logged_events:
                         self._event_log.add(entry)
+
             except IOError as exc:
-                log.info('Unable to read log located at %s: %s' % (log_location, exc))
+                log.info(msg('log.unable_to_read', path=log_path, error=exc))
             except ValueError as exc:
                 log.info(str(exc))
 
     def get_cache(self):
         """
-        Return list of log entries that we have in memory
-        (Could be the log prepolation or the log entries we've stored
-        during execution of erebus)
+        Returns the current log cache we have in memory.
+
+        :returns: dictionary with valid log entries.
         """
-        output = {'header': 'LOG-CACHE', 'entries': []}
+
+        output = {
+            'header': 'LOG-CACHE',
+            'entries': []
+        }
         for entry in list(self._event_log):
-            output['entries'].insert(0, {'time': entry.readable_time,
-                                        'message': entry.message,
-                                        'type': entry.type.lower()})
+            output['entries'].insert(0, {
+                'time': entry.readable_time,
+                'type': entry.type.lower(),
+                'message': entry.message,
+            })
         return output
 
 
 class LogGroup(object):
     """
     Thread safe collection of LogEntry instances, which maintains a
-    certain size.
+    certain size. This is our local log cache.
     """
 
-    def __init__(self, max_size, group_by_day=False):
+    def __init__(self, max_size):
         self._max_size = max_size
         self._entries = []
         self._lock = threading.RLock()
@@ -222,7 +321,7 @@ class LogGroup(object):
 
     def pop(self):
         with self._lock:
-            last_entry = self._entries.pop()
+            self._entries.pop()
 
     def __len__(self):
         with self._lock:
@@ -242,6 +341,7 @@ class LogEntry(object):
     component may be inaccurate. (:trac:`15607`)
 
     :var int timestamp: unix timestamp for when the event occured
+    :var str readable_time: human readable time of the log entry
     :var str type: event type
     :var str message: event's message
     """
@@ -250,10 +350,11 @@ class LogEntry(object):
         self.timestamp = timestamp
         self.type = type
         self.message = message
+
+        # Make a readable time description from the timestamp.
         entry_time = time.localtime(self.timestamp)
-        self.readable_time = '%02i:%02i:%02i' % (entry_time[3],
-                                                entry_time[4],
-                                                entry_time[5])
+        self.readable_time = '%02i:%02i:%02i' % (
+            entry_time[3], entry_time[4], entry_time[5])
 
     def __eq__(self, other):
         if isinstance(other, LogEntry):
@@ -269,19 +370,87 @@ def log_file_path():
     """
     Provides the path where tor's log file resides, if one exists.
 
-    :params stem.control.Controller controller: tor controller connection
-
-    :returns: **str** with the absolute path of our log file, or **None**
+    :returns: **str** with the absolute path of tor log file, or **None**
     if one doesn't exist
     """
     controller = tor_controller()
-    if controller is not None:
-        for log_entry in controller.get_conf('Log', [], True):
-            entry_comp = log_entry.split()
-            # looking for an entry like:
-            # notice file /var/log/tor/notices.log
-            if entry_comp[1] == 'file':
-                return CONFIG['tor.chroot'] + entry_comp[2]
+    for log_entry in controller.get_conf('Log', [], True):
+        entry_comp = log_entry.split()
+        # looking for an entry like:
+        # notice file /var/log/tor/notices.log
+        if entry_comp[1] == 'file':
+            return CONFIG['tor.chroot'] + entry_comp[2]
+
+
+def read_tor_log(path, read_limit=None):
+    """
+    Provides logging messages from a tor log file, from newest to oldest.
+
+    :param str path: logging location to read from
+    :param int read_limit: maximum number of lines to read from the file
+
+    :returns: **iterator** for **LogEntry** for the file's contents
+
+    :raises:
+    * **ValueError** if the log file has unrecognized content
+    * **IOError** if unable to read the file
+    """
+
+    start_time = time.time()
+    count, isdst = 0, time.localtime().tm_isdst
+
+    for line in system.tail(path, read_limit):
+        # entries look like:
+        # Jul 15 18:29:48.806 [notice] Parsing GEOIP file.
+
+        line_comp = line.split()
+
+        # Checks that we have all the components we expect. This could
+        # happen if we're either not parsing a tor log or in weird edge
+        # cases (like being out of disk space).
+
+        if len(line_comp) < 4:
+            raise ValueError(msg('log.bad_format', path=path, line=line))
+        elif line_comp[3][1:-1].upper() not in TOR_RUNLEVELS:
+            raise ValueError(msg(
+                'log.unknown_runlevel', path=path, runlevel=line_comp[3]))
+
+        runlevel = line_comp[3][1:-1].upper()
+        msg_str = ' '.join(line_comp[4:])
+        current_year = str(datetime.datetime.now().year)
+
+        # Pretending it's the current year. We don't know the actual
+        # year (#15607) and this may fail due to leap years when picking
+        # Feb 29th (#5265).
+
+        try:
+            timestamp_str = current_year + ' ' + ' '.join(line_comp[:3])
+            # drop fractional seconds
+            timestamp_str = timestamp_str.split('.', 1)[0]
+            timestamp_comp = list(time.strptime(
+                timestamp_str, '%Y %b %d %H:%M:%S'))
+            timestamp_comp[8] = isdst
+            # converts local to unix time
+            timestamp = int(time.mktime(tuple(timestamp_comp)))
+
+            if timestamp > time.time():
+                # log entry is from before a year boundary
+                timestamp_comp[0] -= 1
+                timestamp = int(time.mktime(timestamp_comp))
+        except ValueError:
+            raise ValueError(msg(
+                'log.bad_timestamp', path=path, value=' '.join(line_comp[:3])))
+
+        count += 1
+        yield LogEntry(timestamp, runlevel, msg_str)
+
+        if 'opening log file' in msg_str:
+            break  # this entry marks the start of this tor instance
+
+    log.info(msg(
+        'log.read_from_log_file', count=count, path=path,
+        read_limit=read_limit, runtime='%0.3f' % (time.time() - start_time)))
+
 
 @lru_cache()
 def condense_runlevels(*events):
@@ -352,69 +521,20 @@ def condense_runlevels(*events):
 
     return result + events
 
-def read_tor_log(path, read_limit=None):
+
+def missing_event_types():
     """
-    Provides logging messages from a tor log file, from newest to oldest.
+    Provides the event types the current tor connection supports but erebus
+    doesn't. This provides an empty list if no event types are missing or the
+    GETINFO query fails.
 
-    :param str path: logging location to read from
-    :param int read_limit: maximum number of lines to read from the file
-
-    :returns: **iterator** for **LogEntry** for the file's contents
-
-    :raises:
-    * **ValueError** if the log file has unrecognized content
-    * **IOError** if unable to read the file
+    :returns: **list** of missing event types
     """
 
-    start_time = time.time()
-    count, isdst = 0, time.localtime().tm_isdst
+    response = None
+    controller = tor_controller()
+    response = controller.get_info('events/names', []) if controller else []
 
-    for line in system.tail(path, read_limit):
-        # entries look like:
-        # Jul 15 18:29:48.806 [notice] Parsing GEOIP file.
-
-        line_comp = line.split()
-
-        # Checks that we have all the components we expect. This could
-        # happen if we're either not parsing a tor log or in weird edge
-        # cases (like being out of disk space).
-
-        if len(line_comp) < 4:
-            raise ValueError("Log located at %s has a line that doesn't match the format we expect: %s" % (path, line))
-        elif len(line_comp[3]) < 3 or line_comp[3][1:-1].upper() not in TOR_RUNLEVELS:
-            raise ValueError('Log located at %s has an unrecognized runlevel: %s' % (path, line_comp[3]))
-
-        runlevel = line_comp[3][1:-1].upper()
-        msg = ' '.join(line_comp[4:])
-        current_year = str(datetime.datetime.now().year)
-
-        # Pretending it's the current year. We don't know the actual
-        # year (#15607) and this may fail due to leap years when picking
-        # Feb 29th (#5265).
-
-        try:
-            timestamp_str = current_year + ' ' + ' '.join(line_comp[:3])
-            # drop fractional seconds
-            timestamp_str = timestamp_str.split('.', 1)[0]
-            timestamp_comp = list(time.strptime(
-                timestamp_str, '%Y %b %d %H:%M:%S'))
-            timestamp_comp[8] = isdst
-            # converts local to unix time
-            timestamp = int(time.mktime(tuple(timestamp_comp)))
-
-            if timestamp > time.time():
-                # log entry is from before a year boundary
-                timestamp_comp[0] -= 1
-                timestamp = int(time.mktime(timestamp_comp))
-        except ValueError:
-            raise ValueError("Log located at %s has a timestamp we don't recognize: %s" % (path, ' '.join(line_comp[:3])))
-
-        count += 1
-        yield LogEntry(timestamp, runlevel, msg)
-
-        if 'opening log file' in msg:
-            break  # this entry marks the start of this tor instance
-
-    #log.info('log.read_from_log_file', count=count, path=path,
-    #        read_limit=read_limit if read_limit else 'none',
-    #        runtime='%0.3f' % (time.time() - start_time))
+    tor_event_types = response.split(' ')
+    recognized_types = TOR_EVENT_TYPES.values()
+    return list(filter(lambda x: x not in recognized_types, tor_event_types))
